@@ -1,0 +1,10 @@
+streamlit
+supabase
+python-dotenv
+requests
+plotly
+pandas
+google-api-python-client
+google-auth
+google-auth-oauthlib
+python-dotenv
