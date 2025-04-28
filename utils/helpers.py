@@ -9,7 +9,12 @@ def format_day_of_week(day_num: int) -> str:
         5: "Субота",
         6: "Неділя",
     }
+    try:
+        day_num = int(day_num)
+    except (ValueError, TypeError):
+        return "Невідомо"
     return days_ukrainian.get(day_num, "Невідомо")
+
 
 def format_monthly_position(pos: int) -> str:
     mapping = {1: "Перший", 2: "Другий", 3: "Третій", 4: "Четвертий", -1: "Останній"}

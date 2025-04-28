@@ -13,22 +13,29 @@ def show_add():
 
     if option == "Звичку":
         frequency = st.selectbox("Частота", ["daily", "weekly", "monthly"], key="freq")
+
         day_of_week = None
         monthly_week = None
 
         if frequency in ["weekly", "monthly"]:
-            day_name = st.selectbox("День тижня повторення", [
-                "Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"
-            ])
-            day_of_week = day_name
+            day_of_week = st.selectbox(
+                "День тижня для повторення",
+                options=list(range(7)),
+                format_func=lambda x: ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"][x],
+            )
+
         if frequency == "monthly":
-            monthly_week = st.selectbox("Тиждень місяця", [1, 2, 3, 4, -1])
+            monthly_week = st.selectbox(
+                "Тиждень місяця",
+                options=[1, 2, 3, 4, -1],
+                format_func=lambda x: {1: "Перший", 2: "Другий", 3: "Третій", 4: "Четвертий", -1: "Останній"}[x],
+            )
 
         if st.button("Додати звичку"):
             if not name:
                 st.warning("❗ Введіть назву звички.")
             else:
-                insert_to_table("habits_active", {
+                habit_data = {
                     "name": name,
                     "description": description,
                     "frequency": frequency,
@@ -36,7 +43,8 @@ def show_add():
                     "monthly_week": monthly_week,
                     "completed": False,
                     "user_id": user.id
-                })
+                }
+                insert_to_table("habits_active", habit_data)
                 st.success("✅ Звичку додано!")
 
     elif option == "Завдання":
@@ -47,12 +55,13 @@ def show_add():
             if not name:
                 st.warning("❗ Введіть назву завдання.")
             else:
-                insert_to_table("tasks_active", {
+                task_data = {
                     "name": name,
                     "description": description,
                     "date": date.isoformat(),
                     "time": time.strftime('%H:%M:%S'),
                     "completed": False,
                     "user_id": user.id
-                })
+                }
+                insert_to_table("tasks_active", task_data)
                 st.success("✅ Завдання додано!")
