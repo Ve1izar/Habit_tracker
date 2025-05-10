@@ -1,6 +1,6 @@
 import streamlit as st
 from frontend.auth import require_login, logout, register
-from frontend.Pages import Home, Add, Postponed, Stats, Profile
+from frontend.Pages import Home, Add, Postponed, Stats, Profile, Calendar
 
 st.set_page_config(page_title="Habit Tracker", layout="wide")
 
@@ -8,8 +8,9 @@ PAGES = {
     "🏠 Home": Home.show_home,
     "➕ Додати": Add.show_add,
     "⏸️ Відкладені": Postponed.show_postponed,
-    "📊 Статистика": Stats.show_statistics,
+    "📊 Статистика": Stats.show_stats,
     "👤 Профіль": Profile.show_profile,
+    "📆 Керування календарем": Calendar.show_calendar
 }
 
 # --- Перевірка авторизації ---

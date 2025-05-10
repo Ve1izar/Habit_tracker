@@ -1,9 +1,23 @@
-from datetime import datetime
-import pandas as pd
-from backend.database import fetch_table, move_entry, insert_to_table
-from utils.helpers import format_day_of_week
-from backend.calendar_sync import add_event_to_calendar
 import datetime as dt
+from datetime import datetime, timezone
+import pandas as pd
+
+from backend.database import (
+    fetch_table,
+    insert_to_table,
+    move_entry,
+    update_entry,
+    delete_entry
+)
+
+from backend.calendar_sync import (
+    delete_event_by_id,
+    update_event_in_calendar,
+    sync_all_to_calendar
+)
+
+from utils.helpers import format_day_of_week
+
 
 # --- Активні звички ---
 def get_active_habits(user_id):
@@ -16,132 +30,94 @@ def get_active_habits(user_id):
 def get_active_tasks(user_id):
     return fetch_table("tasks_active", user_id)
 
-# --- Завершені звички і завдання ---
-def get_completed_items(user_id):
-    habits = fetch_table("habits_completed", user_id)
-    tasks = fetch_table("tasks_completed", user_id)
-    return habits, tasks
-
 # --- Відкладені звички і завдання ---
-def get_postponed_items(user_id):
+def get_postponed_habits(user_id):
     habits = fetch_table("habits_postponed", user_id)
-    tasks = fetch_table("tasks_postponed", user_id)
     for habit in habits:
         habit["day_name"] = format_day_of_week(int(habit.get("day_of_week") or 0))
+    return habits
+
+def get_postponed_tasks(user_id):
+    return fetch_table("tasks_postponed", user_id)
+
+def get_postponed_items(user_id: str):
+    habits = get_postponed_habits(user_id)
+    tasks = get_postponed_tasks(user_id)
     return habits, tasks
 
 # --- Завершити запис ---
-def complete_entry(entry_type, entry_id, user_id):
-    if entry_type == "habit":
-        # Завантажити поточну звичку по id
-        habits = fetch_table("habits_active", user_id)
-        habit = next((h for h in habits if h["id"] == entry_id), None)
+def complete_entry(entry_type: str, entry_id: str, user_id: str):
+    now = datetime.now(timezone.utc).isoformat()
 
+    if entry_type == "habit":
+        habit = fetch_table("habits_active", user_id, entry_id)
         if habit:
+            habit = habit[0]
             insert_to_table("habit_logs", {
                 "habit_id": habit["id"],
-                "habit_name": habit["name"],  # ⚡ нове поле
+                "habit_name": habit["name"],
                 "user_id": user_id,
-                "completed_at": datetime.now().isoformat()
+                "completed_at": now
             })
-    else:
-        source_table = f"{entry_type}s_active"
-        target_table = f"{entry_type}s_completed"
-        move_entry(source_table, target_table, entry_id, user_id)
+    elif entry_type == "task":
+        task = fetch_table("tasks_active", user_id, entry_id)
+        if task:
+            task = task[0]
+            if task.get("event_id"):
+                delete_event_by_id(user_id, task["event_id"])
+            move_entry("tasks_active", "tasks_completed", entry_id, user_id, {
+                "completed_at": now
+            })
 
-def get_completed_entries_by_month(user_id):
-    habits = fetch_table("habit_logs", user_id)  # ⚡ тепер беремо habit_logs
-    tasks = fetch_table("tasks_completed", user_id)
-
-    for h in habits:
-        h["type"] = "habit"
-        h["date"] = h.get("completed_at") or datetime.now().isoformat()
-        h["name"] = h.get("habit_name", "Невідома звичка")  # ⚡ беремо назву звички
-
-    for t in tasks:
-        t["type"] = "task"
-        t["date"] = t.get("completed_at") or datetime.now().isoformat()
-
-    return pd.DataFrame(habits + tasks)
-
+# --- Завершити звичку ---
+def complete_habit_perm(entry_id: str, user_id: str):
+    move_entry("habits_active", "habits_completed", entry_id, user_id)
 
 # --- Відкласти запис ---
 def postpone_entry(entry_type, entry_id, user_id):
-    source_table = f"{entry_type}s_active"
-    target_table = f"{entry_type}s_postponed"
-    move_entry(source_table, target_table, entry_id, user_id)
+    source = f"{entry_type}s_active"
+    target = f"{entry_type}s_postponed"
+    move_entry(source, target, entry_id, user_id)
 
-# --- Повернути запис з відкладеного ---
+# --- Повернути запис ---
 def restore_entry(entry_type, entry_id, user_id):
-    source_table = f"{entry_type}s_postponed"
-    target_table = f"{entry_type}s_active"
-    move_entry(source_table, target_table, entry_id, user_id)
+    source = f"{entry_type}s_postponed"
+    target = f"{entry_type}s_active"
+    move_entry(source, target, entry_id, user_id)
+
+# --- Оновити запис + календар ---
+def update_entry_with_calendar(table, entry_id, data, user_id):
+    update_entry(table, entry_id, data, user_id)
+    updated = fetch_table(table, user_id, entry_id)
+    if updated and updated[0].get("event_id"):
+        update_event_in_calendar(user_id, updated[0]["event_id"], updated[0])
 
 # --- Статистика завершених ---
 def get_completed_entries_by_month(user_id):
     habit_logs = fetch_table("habit_logs", user_id)
+    habits_completed = fetch_table("habits_completed", user_id)
     tasks = fetch_table("tasks_completed", user_id)
 
-    # Завантажити всі активні звички для відображення назв
     habits_active = fetch_table("habits_active", user_id)
-    habits_mapping = {habit["id"]: habit["name"] for habit in habits_active}
+    habit_names = {h["id"]: h["name"] for h in habits_active}
 
-    # Додаємо інформацію в логи звичок
     for log in habit_logs:
         log["type"] = "habit"
         log["date"] = log.get("completed_at") or datetime.now().isoformat()
-        log["name"] = habits_mapping.get(log.get("habit_id"), "Невідома звичка")
+        log["name"] = habit_names.get(log.get("habit_id"), log.get("habit_name", "Невідома звичка"))
 
-    # Додаємо інформацію в завдання
+    for h in habits_completed:
+        h["type"] = "habit"
+        h["date"] = h.get("completed_at") or datetime.now().isoformat()
+        h["name"] = h.get("name", "Звичка")
+
     for t in tasks:
         t["type"] = "task"
         t["date"] = t.get("completed_at") or datetime.now().isoformat()
 
-    return pd.DataFrame(habit_logs + tasks)
+    return pd.DataFrame(habit_logs + habits_completed + tasks)
 
 
-# --- Синхронізація з Google Calendar ---
+# --- Синхронізація ---
 def sync_events_to_google_calendar(user_id):
-    habits = get_active_habits(user_id)
-    tasks = get_active_tasks(user_id)
-
-    # Синхронізація звичок
-    for habit in habits:
-        name = habit["name"]
-        description = habit.get("description", "")
-        frequency = habit.get("frequency", "daily")
-        time = habit.get("time") or "08:00"  # <-- Безпечне значення, якщо time немає
-        day_of_week = habit.get("day_of_week", 0)
-        monthly_week = habit.get("monthly_week", 1)
-
-        # Час початку
-        start_time = dt.datetime.now().replace(hour=int(time[:2]), minute=int(time[3:5]), second=0)
-
-        # Генерація recurrence для звичок
-        recurrence = None
-        if frequency == "daily":
-            recurrence = ["RRULE:FREQ=DAILY"]
-        elif frequency == "weekly":
-            byday = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"][int(day_of_week)]
-            recurrence = [f"RRULE:FREQ=WEEKLY;BYDAY={byday}"]
-        elif frequency == "monthly":
-            byday = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"][int(day_of_week)]
-            recurrence = [f"RRULE:FREQ=MONTHLY;BYDAY={monthly_week}{byday}"]
-
-        # Стандартно тривалість події = 1 година
-        end_time = start_time + dt.timedelta(hours=1)
-
-        add_event_to_calendar(name, start_time, end_time, description, recurrence)
-
-    # Синхронізація завдань
-    for task in tasks:
-        name = task["name"]
-        description = task.get("description", "")
-        date_str = task["date"]
-        time_str = task.get("time") or "08:00"  # <-- Безпечне значення, якщо time немає
-
-        # Час початку і закінчення
-        start_time = dt.datetime.fromisoformat(f"{date_str}T{time_str}")
-        end_time = start_time + dt.timedelta(hours=1)
-
-        add_event_to_calendar(name, start_time, end_time, description)
+    sync_all_to_calendar(user_id)

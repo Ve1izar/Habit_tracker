@@ -3,7 +3,7 @@ import pandas as pd
 from frontend.auth import require_login
 from backend.logic import get_completed_entries_by_month
 
-def show_statistics():
+def show_stats():
     user = require_login()
     st.title("📊 Статистика виконаних завдань і звичок")
 

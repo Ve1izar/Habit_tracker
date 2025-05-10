@@ -22,9 +22,9 @@ def login():
     if st.button("Увійти"):
         try:
             result = supabase.auth.sign_in_with_password({"email": email, "password": password})
-            st.session_state["auth"] = result                       # Зберігаємо об’єкт авторизації
-            st.session_state["user"] = result.user                  # Зберігаємо користувача
-            st.session_state["token"] = result.session.access_token  # Зберігаємо access_token
+            st.session_state["auth"] = result
+            st.session_state["user"] = result.user
+            st.session_state["token"] = result.session.access_token
             st.success("✅ Вхід виконано успішно")
             st.rerun()
         except Exception:
