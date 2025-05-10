@@ -5,22 +5,21 @@ from backend.logic import (
     get_active_tasks,
     complete_entry,
     postpone_entry,
-    sync_events_to_google_calendar
+    delete_entry,
+    complete_habit_perm,
 )
-from backend.database import update_entry, delete_entry
+from backend.database import update_entry
 from utils.helpers import format_day_of_week, format_monthly_position
 from datetime import datetime
 
 def show_home():
     user = require_login()
+    user_id = user.id
+
     st.title("🏠 Активні звички та завдання")
 
-    if st.button("🔄 Синхронізувати з Google Calendar"):
-        sync_events_to_google_calendar(user.id)
-        st.success("✅ Синхронізація завершена!")
-
     st.subheader("🔁 Активні звички")
-    habits = get_active_habits(user.id)
+    habits = get_active_habits(user_id)
 
     for habit in habits:
         with st.container():
@@ -32,28 +31,36 @@ def show_home():
             else:
                 repeat_str = "Щодня"
 
+            calendar_status = "✅ Синхронізовано" if habit.get("event_id") else "❌ Не синхронізовано"
+
             st.markdown(
                 f"""
                 <div style="border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
                     <strong>{habit['name']}</strong> — {habit['frequency']} ({repeat_str})<br>
-                    <small>{habit.get('description', '')}</small>
+                    <small>{habit.get('description', '')}</small><br>
+                    <i>{calendar_status}</i>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-            cols = st.columns([1, 1, 1])
+            cols = st.columns([1, 1, 1, 1])
             with cols[0]:
-                if st.button("✅ Завершити", key=f"complete_habit_{habit['id']}"):
-                    complete_entry("habit", habit["id"], user.id)
+                if st.button("☑️ Завершити", key=f"complete_habit_{habit['id']}"):
+                    complete_entry("habit", habit["id"], user_id)
                     st.rerun()
             with cols[1]:
                 if st.button("⏸️ Відкласти", key=f"postpone_habit_{habit['id']}"):
-                    postpone_entry("habit", habit["id"], user.id)
+                    postpone_entry("habit", habit["id"], user_id)
                     st.rerun()
             with cols[2]:
                 if st.button("🗑️ Скасувати", key=f"delete_habit_{habit['id']}"):
-                    delete_entry("habits_active", habit["id"])
+                    delete_entry("habits_active", habit["id"], user_id)
+                    st.rerun()
+            with cols[3]:
+                if st.button("✅ Завершити повністю", key=f"perm_complete_habit_{habit['id']}"):
+                    complete_habit_perm(habit["id"], user_id)
+                    st.success("🎯 Звичка завершена остаточно!")
                     st.rerun()
 
             with st.expander("✏️ Редагувати"):
@@ -92,37 +99,41 @@ def show_home():
                         "frequency": new_frequency,
                         "day_of_week": new_day_of_week,
                         "monthly_week": new_monthly_week,
-                    })
+                    }, user_id)
                     st.success("✅ Звичку оновлено!")
                     st.rerun()
 
+    # --- Завдання ---
     st.subheader("📌 Активні завдання")
-    tasks = get_active_tasks(user.id)
+    tasks = get_active_tasks(user_id)
 
     for task in tasks:
+        calendar_status = "✅ Синхронізовано" if task.get("event_id") else "❌ Не синхронізовано"
+
         with st.container():
             st.markdown(
                 f"""
-                <div style="border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                    <strong>{task['name']}</strong> — {task['date']} о {task['time']}<br>
-                    <small>{task.get('description', '')}</small>
-                </div>
-                """,
+                    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <strong>{task['name']}</strong> — {task['date']} о {task['time']}<br>
+                        <small>{task.get('description', '')}</small><br>
+                        <i>{calendar_status}</i>
+                    </div>
+                    """,
                 unsafe_allow_html=True
             )
 
             cols = st.columns([1, 1, 1])
             with cols[0]:
                 if st.button("✅ Завершити", key=f"complete_task_{task['id']}"):
-                    complete_entry("task", task["id"], user.id)
+                    complete_entry("task", task["id"], user_id)
                     st.rerun()
             with cols[1]:
                 if st.button("⏸️ Відкласти", key=f"postpone_task_{task['id']}"):
-                    postpone_entry("task", task["id"], user.id)
+                    postpone_entry("task", task["id"], user_id)
                     st.rerun()
             with cols[2]:
                 if st.button("🗑️ Скасувати", key=f"delete_task_{task['id']}"):
-                    delete_entry("tasks_active", task["id"])
+                    delete_entry("tasks_active", task["id"], user_id)
                     st.rerun()
 
             with st.expander("✏️ Редагувати"):
@@ -145,6 +156,6 @@ def show_home():
                         "description": new_description,
                         "date": str(new_date),
                         "time": str(new_time),
-                    })
+                    }, user_id)
                     st.success("✅ Завдання оновлено!")
                     st.rerun()
