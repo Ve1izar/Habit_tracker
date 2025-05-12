@@ -62,15 +62,21 @@ def update_entry(table: str, entry_id: str, updated_data: dict, user_id: str):
 
         dt_end = dt_start + timedelta(hours=1)
 
+        frequency = updated_data.get("frequency", existing.get("frequency"))
+        day_of_week = updated_data.get("day_of_week", existing.get("day_of_week"))
+
         updated_entry = {
             "name": title,
             "description": description,
             "start_time": dt_start,
             "end_time": dt_end,
-            "frequency": updated_data.get("frequency", existing.get("frequency")),
-            "day_of_week": updated_data.get("day_of_week", existing.get("day_of_week")),
-            "monthly_week": updated_data.get("monthly_week", existing.get("monthly_week")),
+            "frequency": frequency,
+            "day_of_week": day_of_week,
         }
+
+        if frequency == "monthly":
+            monthly_week = updated_data.get("monthly_week", existing.get("monthly_week", 1))
+            updated_entry["monthly_week"] = monthly_week
 
         update_event_in_calendar(user_id, event_id, updated_entry)
 
@@ -125,4 +131,10 @@ def move_entry(source_table: str, target_table: str, entry_id: int, user_id: str
 
     client.table(target_table).insert(entry).execute()
     client.table(source_table).delete().eq("id", entry_id).eq("user_id", user_id).execute()
+
+def clear_all_event_ids(user_id: str):
+    client = get_supabase_client_with_token(get_token())
+
+    for table in ["habits_active", "tasks_active"]:
+        client.table(table).update({"event_id": None}).eq("user_id", user_id).execute()
 

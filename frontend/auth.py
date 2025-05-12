@@ -68,10 +68,10 @@ def update_display_name(name: str):
     if user:
         supabase.auth.update_user({"data": {"name": name}})
 
-def update_email(new_email: str):
-    user = get_current_user()
-    if user:
-        supabase.auth.update_user({"email": new_email})
+# def update_email(new_email: str):
+#     user = get_current_user()
+#     if user:
+#         supabase.auth.update_user({"email": new_email})
 
 def update_password(new_password: str):
     user = get_current_user()

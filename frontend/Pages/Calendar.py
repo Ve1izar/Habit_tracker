@@ -7,7 +7,7 @@ from backend.google_auth import (
     finish_auth_flow,
     get_token_path,
 )
-from backend.calendar_sync import sync_all_to_calendar, delete_spam_events
+from backend.calendar_sync import sync_all_to_calendar, delete_spam_events, sync_habits_to_calendar
 from datetime import datetime
 import os
 
@@ -69,29 +69,56 @@ def show_calendar():
                 st.error(f"❌ Помилка авторизації: {e}")
 
     # --------------------------
-    # 🔄 Синхронізація подій
+    # 🔄 Синхронізація справ
     # --------------------------
     st.markdown("---")
-    st.subheader("🔄 Синхронізація")
-
-    if st.button("🔁 Синхронізувати записи без подій"):
+    st.subheader("🔄 Синхронізація активних справ (без event_id)")
+    if st.button("🔁 Синхронізувати справи"):
         try:
-            sync_all_to_calendar(user_id)
-            st.success("✅ Усі записи без подій синхронізовано до Google Calendar.")
+            from backend.calendar_sync import sync_tasks_to_calendar
+            sync_tasks_to_calendar(user_id)
+            st.success("✅ Справи синхронізовано до Google Calendar.")
         except RefreshError:
             st.error("❌ Потрібна повторна авторизація Google.")
         except Exception as e:
             st.error(f"❌ Помилка синхронізації: {e}")
 
     # --------------------------
-    # 🗑️ Масове очищення подій
+    # 🛑 Небезпечна зона
     # --------------------------
     st.markdown("---")
-    st.subheader("🧹 Очистити події з календаря (на 30 днів уперед)")
+    with st.expander("🛑 Небезпечна зона"):
+        st.markdown("**Очистити всі записи**")
+        st.caption("Всі внесені вами дані про активні та відкладені справи та звички будуть видалені.")
 
-    if st.button("🧹 Очистити календар"):
-        try:
-            deleted_count = delete_spam_events(user_id)
-            st.success(f"✅ Видалено {deleted_count} подій.")
-        except Exception as e:
-            st.error(f"❌ Помилка при видаленні подій: {e}")
+        if st.button("🔥 Очистити всі записи"):
+            try:
+                # Видалення всіх подій з Google Calendar
+                service = get_calendar_service_for_user(user_id)
+                events = service.events().list(calendarId='primary', singleEvents=True).execute().get("items", [])
+                deleted_count = 0
+                for event in events:
+                    try:
+                        service.events().delete(calendarId='primary', eventId=event["id"]).execute()
+                        deleted_count += 1
+                    except Exception as e:
+                        print(f"⚠️ Не вдалося видалити подію {event['id']}: {e}")
+
+                # Видалення записів з таблиць Supabase
+                from backend.database import get_supabase_client_with_token
+                token = st.session_state.get("token")
+                client = get_supabase_client_with_token(token)
+
+                tables_to_clear = [
+                    "habits_active", "tasks_active",
+                    "habits_postponed", "tasks_postponed"
+                ]
+                for table in tables_to_clear:
+                    client.table(table).delete().eq("user_id", user_id).execute()
+
+                st.success(f"✅ Видалено {deleted_count} подій з Google Calendar та всі активні/відкладені записи.")
+
+            except Exception as e:
+                st.error(f"❌ Помилка при очищенні: {e}")
+
+

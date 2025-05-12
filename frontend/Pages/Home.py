@@ -1,4 +1,6 @@
 import streamlit as st
+from datetime import datetime
+
 from frontend.auth import require_login
 from backend.logic import (
     get_active_habits,
@@ -10,7 +12,22 @@ from backend.logic import (
 )
 from backend.database import update_entry
 from utils.helpers import format_day_of_week, format_monthly_position
-from datetime import datetime
+from backend.google_auth import get_calendar_service_for_user
+from googleapiclient.errors import HttpError
+
+
+def verify_event_exists(user_id: str, event_id: str, table: str, entry_id: str):
+    try:
+        service = get_calendar_service_for_user(user_id)
+        service.events().get(calendarId='primary', eventId=event_id).execute()
+    except HttpError as e:
+        if e.resp.status == 404:
+            update_entry(table, entry_id, {"event_id": None}, user_id)
+        elif e.resp.status == 401:
+            st.warning("❗ Авторизація Google недійсна. Повторно авторизуйтесь.")
+        else:
+            st.warning(f"⚠️ Не вдалося перевірити подію {event_id}: {e}")
+
 
 def show_home():
     user = require_login()
@@ -18,8 +35,81 @@ def show_home():
 
     st.title("🏠 Активні звички та завдання")
 
+    # --- Завдання ---
+    st.subheader("📌 Активні завдання")
+    tasks = get_active_tasks(user_id)
+
+    if not tasks:
+        st.info("ℹ️ Немає активних завдань. Додайте нове завдання у вкладці 'Додати'.")
+    else:
+        for task in tasks:
+            if task.get("event_id"):
+                verify_event_exists(user_id, task["event_id"], "tasks_active", task["id"])
+
+    for task in tasks:
+        with st.container():
+            calendar_status = "✅ Синхронізовано" if task.get("event_id") else "❌ Не синхронізовано"
+
+            st.markdown(
+                f"""
+                    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                        <strong>{task['name']}</strong> — {task['date']} о {task['time']}<br>
+                        <small>{task.get('description', '')}</small><br>
+                        <i>{calendar_status}</i>
+                    </div>
+                    """,
+                unsafe_allow_html=True
+            )
+
+            cols = st.columns([1, 1, 1])
+            with cols[0]:
+                if st.button("✅ Завершити", key=f"complete_task_{task['id']}"):
+                    complete_entry("task", task["id"], user_id)
+                    st.rerun()
+            with cols[1]:
+                if st.button("⏸️ Відкласти", key=f"postpone_task_{task['id']}"):
+                    postpone_entry("task", task["id"], user_id)
+                    st.rerun()
+            with cols[2]:
+                if st.button("🗑️ Скасувати", key=f"delete_task_{task['id']}"):
+                    delete_entry("tasks_active", task["id"], user_id)
+                    st.rerun()
+
+            with st.expander("✏️ Редагувати"):
+                new_name = st.text_input("Назва", value=task["name"], key=f"name_task_{task['id']}")
+                new_description = st.text_area("Опис", value=task.get("description", ""), key=f"desc_task_{task['id']}")
+                new_date = st.date_input(
+                    "Дата",
+                    value=datetime.strptime(task["date"], "%Y-%m-%d").date(),
+                    key=f"date_task_{task['id']}"
+                )
+                new_time = st.time_input(
+                    "Час",
+                    value=datetime.strptime(task["time"], "%H:%M:%S").time(),
+                    key=f"time_task_{task['id']}"
+                )
+
+                if st.button("💾 Зберегти", key=f"save_task_{task['id']}"):
+                    update_entry("tasks_active", task["id"], {
+                        "name": new_name,
+                        "description": new_description,
+                        "date": str(new_date),
+                        "time": str(new_time),
+                    }, user_id)
+                    st.success("✅ Завдання оновлено!")
+                    st.rerun()
+
+    st.markdown("---")
+    # --- Звички ---
     st.subheader("🔁 Активні звички")
     habits = get_active_habits(user_id)
+
+    if not habits:
+        st.info("ℹ️ Немає активних звичок. Додайте нову звичку у вкладці 'Додати'.")
+    else:
+        for habit in habits:
+            if habit.get("event_id"):
+                verify_event_exists(user_id, habit["event_id"], "habits_active", habit["id"])
 
     for habit in habits:
         with st.container():
@@ -87,8 +177,8 @@ def show_home():
                 if new_frequency == "monthly":
                     new_monthly_week = st.selectbox(
                         "Тиждень місяця",
-                        options=[1, 2, 3, 4, -1],
-                        index=[1, 2, 3, 4, -1].index(habit.get("monthly_week", 1)),
+                        options=[1, 2, 3, 4],
+                        index=[1, 2, 3, 4].index(habit.get("monthly_week", 1)),
                         key=f"month_habit_{habit['id']}"
                     )
 
@@ -103,59 +193,4 @@ def show_home():
                     st.success("✅ Звичку оновлено!")
                     st.rerun()
 
-    # --- Завдання ---
-    st.subheader("📌 Активні завдання")
-    tasks = get_active_tasks(user_id)
 
-    for task in tasks:
-        calendar_status = "✅ Синхронізовано" if task.get("event_id") else "❌ Не синхронізовано"
-
-        with st.container():
-            st.markdown(
-                f"""
-                    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                        <strong>{task['name']}</strong> — {task['date']} о {task['time']}<br>
-                        <small>{task.get('description', '')}</small><br>
-                        <i>{calendar_status}</i>
-                    </div>
-                    """,
-                unsafe_allow_html=True
-            )
-
-            cols = st.columns([1, 1, 1])
-            with cols[0]:
-                if st.button("✅ Завершити", key=f"complete_task_{task['id']}"):
-                    complete_entry("task", task["id"], user_id)
-                    st.rerun()
-            with cols[1]:
-                if st.button("⏸️ Відкласти", key=f"postpone_task_{task['id']}"):
-                    postpone_entry("task", task["id"], user_id)
-                    st.rerun()
-            with cols[2]:
-                if st.button("🗑️ Скасувати", key=f"delete_task_{task['id']}"):
-                    delete_entry("tasks_active", task["id"], user_id)
-                    st.rerun()
-
-            with st.expander("✏️ Редагувати"):
-                new_name = st.text_input("Назва", value=task["name"], key=f"name_task_{task['id']}")
-                new_description = st.text_area("Опис", value=task.get("description", ""), key=f"desc_task_{task['id']}")
-                new_date = st.date_input(
-                    "Дата",
-                    value=datetime.strptime(task["date"], "%Y-%m-%d").date(),
-                    key=f"date_task_{task['id']}"
-                )
-                new_time = st.time_input(
-                    "Час",
-                    value=datetime.strptime(task["time"], "%H:%M:%S").time(),
-                    key=f"time_task_{task['id']}"
-                )
-
-                if st.button("💾 Зберегти", key=f"save_task_{task['id']}"):
-                    update_entry("tasks_active", task["id"], {
-                        "name": new_name,
-                        "description": new_description,
-                        "date": str(new_date),
-                        "time": str(new_time),
-                    }, user_id)
-                    st.success("✅ Завдання оновлено!")
-                    st.rerun()
