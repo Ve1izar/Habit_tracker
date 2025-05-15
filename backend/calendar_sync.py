@@ -1,9 +1,9 @@
 import datetime
 from datetime import timedelta
+import time
 from googleapiclient.discovery import build
 from backend.google_auth import get_calendar_service_for_user
-from backend.database import update_entry
-from utils.helpers import format_recurrence, format_datetime_for_gcal, get_next_occurrence
+from utils.helpers import format_datetime_for_gcal, get_next_occurrence, get_byday_rrule_code
 
 def add_event_to_calendar(user_id: str, summary: str, start: datetime, end: datetime,
                           description: str = "", recurrence: list = None,
@@ -45,26 +45,28 @@ def update_event_in_calendar(user_id: str, event_id: str, entry: dict):
 
     event = service.events().get(calendarId='primary', eventId=event_id).execute()
 
+    # Оновлення базової інформації
     event["summary"] = entry.get("name", event["summary"])
     event["description"] = entry.get("description", event.get("description", ""))
-    event["start"] = {
-        "dateTime": format_datetime_for_gcal(entry["start_time"]),
-        "timeZone": "Europe/Kyiv"
-    }
-    event["end"] = {
-        "dateTime": format_datetime_for_gcal(entry["end_time"]),
-        "timeZone": "Europe/Kyiv"
-    }
 
-    if entry.get("frequency") and entry.get("day_of_week") is not None:
-        from utils.helpers import get_byday_rrule_code
-        byday = get_byday_rrule_code(entry["day_of_week"], entry.get("monthly_week", 1))
-        freq = entry["frequency"]
-        if freq == "daily":
+    start = format_datetime_for_gcal(entry["start_time"])
+    end = format_datetime_for_gcal(entry["end_time"])
+
+    event["start"]["dateTime"] = start
+    event["end"]["dateTime"] = end
+
+    # Оновлення повторення, якщо є частота та день тижня
+    frequency = entry.get("frequency")
+    day_of_week = entry.get("day_of_week")
+
+    if frequency and day_of_week is not None:
+        byday = get_byday_rrule_code(day_of_week, entry.get("monthly_week", 1))
+
+        if frequency == "daily":
             event["recurrence"] = ["RRULE:FREQ=DAILY"]
-        elif freq == "weekly":
+        elif frequency == "weekly":
             event["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={byday[-2:]}"]
-        elif freq == "monthly":
+        elif frequency == "monthly":
             event["recurrence"] = [f"RRULE:FREQ=MONTHLY;BYDAY={byday}"]
 
     service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
@@ -86,12 +88,12 @@ def delete_event_by_id(user_id: str, event_id: str):
 # -------------------------------
 # Масова синхронізація (для наявних записів)
 # -------------------------------
-import datetime
-from backend.calendar_sync import add_event_to_calendar
-from backend.database import update_entry, fetch_table
-from utils.helpers import format_recurrence, get_next_occurrence
 
 def sync_all_to_calendar(user_id: str):
+    from backend.database import fetch_table, update_entry
+    from backend.calendar_sync import add_event_to_calendar
+    from utils.helpers import format_recurrence, get_next_occurrence
+
     habits = fetch_table("habits_active", user_id)
     tasks = fetch_table("tasks_active", user_id)
 
@@ -105,22 +107,26 @@ def sync_all_to_calendar(user_id: str):
         try:
             time_str = h.get("time", "09:00")
             hour, minute = map(int, time_str.split(":"))
-            start = datetime.datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
-            end = start + datetime.timedelta(hours=1)
 
+            frequency = h.get("frequency", "daily")
             recurrence = format_recurrence(h)
 
-            # Якщо це monthly — визначити найближчу дату для старту
-            if h["frequency"] == "monthly":
+            # Обчислення дати старту
+            if frequency == "monthly":
                 day = h.get("day_of_week", 0)
                 week = h.get("monthly_week", 1)
-                try:
-                    next_date = get_next_occurrence(day, week)
-                    start = datetime.datetime.combine(next_date, datetime.time(hour, minute))
-                    end = start + datetime.timedelta(hours=1)
-                except Exception as e:
-                    print(f"⚠️ Помилка у get_next_occurrence для звички {h['name']}: {e}")
-                    continue
+                next_date = get_next_occurrence(day, week)
+            elif frequency == "weekly":
+                today = datetime.datetime.today().weekday()
+                target_day = h.get("day_of_week", 0)
+                delta_days = (target_day - today) % 7
+                next_date = (datetime.datetime.now() + datetime.timedelta(days=delta_days)).date()
+            else:
+                # daily — просто сьогодні
+                next_date = datetime.datetime.now().date()
+
+            start = datetime.datetime.combine(next_date, datetime.time(hour, minute))
+            end = start + datetime.timedelta(hours=1)
 
             event_id = add_event_to_calendar(
                 user_id,
@@ -139,29 +145,24 @@ def sync_all_to_calendar(user_id: str):
 
     # --- Синхронізація завдань ---
     for t in tasks:
-        event_id = t.get("event_id")
-        if event_id and str(event_id).strip():
-            print(f"✅ Пропущено (вже синхронізовано): {t['name']}")
-            continue
-        if not t.get("date") or not t.get("time"):
-            print(f"⚠️ Пропущено завдання без дати або часу: {t['name']}")
-            continue
-
         try:
+            event_id = t.get("event_id")
+            if event_id and str(event_id).strip():
+                print(f"✅ Пропущено (вже синхронізовано): {t['name']}")
+                continue
+
+            if not t.get("date") or not t.get("time"):
+                continue
+
             start = datetime.datetime.fromisoformat(f"{t['date']}T{t['time']}")
             end = start + datetime.timedelta(hours=1)
-            event_id = add_event_to_calendar(
-                user_id,
-                t["name"],
-                start,
-                end,
-                t.get("description", "")
-            )
+
+            event_id = add_event_to_calendar(user_id, t["name"], start, end, t.get("description", ""))
             update_entry("tasks_active", t["id"], {"event_id": event_id}, user_id)
             print(f"✅ Синхронізовано завдання: {t['name']}")
+
         except Exception as e:
             print(f"❌ Помилка синхронізації завдання {t['name']}: {e}")
-
 
 
 # -------------------------------
@@ -169,19 +170,30 @@ def sync_all_to_calendar(user_id: str):
 # -------------------------------
 def delete_spam_events(user_id: str):
     service = get_calendar_service_for_user(user_id)
-    now = datetime.datetime.utcnow().isoformat() + "Z"
-    future = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).isoformat() + "Z"
+    events = []
+    page_token = None
 
-    events = service.events().list(
-        calendarId='primary',
-        timeMin=now,
-        timeMax=future,
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute().get("items", [])
+    while True:
+        response = service.events().list(
+            calendarId='primary',
+            pageToken=page_token
+        ).execute()
+
+        events.extend(response.get("items", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    deleted_count = 0
 
     for event in events:
         try:
-            service.events().delete(calendarId="primary", eventId=event["id"]).execute()
+            service.events().delete(calendarId='primary', eventId=event["id"]).execute()
+            deleted_count += 1
+            time.sleep(0.1)  # Затримка 100 мс
         except Exception as e:
-            print(f"Не вдалося видалити {event['id']}: {e}")
+            print(f"⚠️ Не вдалося видалити подію {event['id']}: {e}")
+
+    return deleted_count
+
+

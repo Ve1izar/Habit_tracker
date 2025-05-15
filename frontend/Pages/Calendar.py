@@ -7,8 +7,7 @@ from backend.google_auth import (
     finish_auth_flow,
     get_token_path,
 )
-from backend.calendar_sync import sync_all_to_calendar, delete_spam_events
-from datetime import datetime
+
 import os
 
 def show_calendar():
@@ -69,29 +68,85 @@ def show_calendar():
                 st.error(f"❌ Помилка авторизації: {e}")
 
     # --------------------------
-    # 🔄 Синхронізація подій
+    # 🔄 Синхронізація справ
     # --------------------------
     st.markdown("---")
-    st.subheader("🔄 Синхронізація")
-
-    if st.button("🔁 Синхронізувати записи без подій"):
+    st.subheader("🔄 Синхронізація активних справ (без event_id)")
+    if st.button("🔁 Синхронізувати справи"):
         try:
+            from backend.calendar_sync import sync_all_to_calendar
             sync_all_to_calendar(user_id)
-            st.success("✅ Усі записи без подій синхронізовано до Google Calendar.")
+            st.success("✅ Справи синхронізовано до Google Calendar.")
         except RefreshError:
             st.error("❌ Потрібна повторна авторизація Google.")
         except Exception as e:
             st.error(f"❌ Помилка синхронізації: {e}")
 
     # --------------------------
-    # 🗑️ Масове очищення подій
+    # 🛑 Небезпечна зона
     # --------------------------
     st.markdown("---")
-    st.subheader("🧹 Очистити події з календаря (на 30 днів уперед)")
+    with st.expander("🛑 Небезпечна зона"):
+        st.markdown("**Очистити всі записи**")
+        st.caption("Всі внесені вами дані про активні та відкладені справи та звички будуть видалені.")
 
-    if st.button("🧹 Очистити календар"):
-        try:
-            deleted_count = delete_spam_events(user_id)
-            st.success(f"✅ Видалено {deleted_count} подій.")
-        except Exception as e:
-            st.error(f"❌ Помилка при видаленні подій: {e}")
+        # --- Очистити календар і скинути event_id ---
+        from backend.database import fetch_table, update_entry
+        from backend.calendar_sync import delete_event_by_id
+        if st.button("🧹 Очистити календар (і скинути event_id)"):
+            try:
+                habits = fetch_table("habits_active", user_id)
+                tasks = fetch_table("tasks_active", user_id)
+                deleted_count = 0
+
+                for h in habits:
+                    event_id = h.get("event_id")
+                    if event_id:
+                        try:
+                            delete_event_by_id(user_id, event_id)
+                            update_entry("habits_active", h["id"], {"event_id": None}, user_id)
+                            deleted_count += 1
+                        except Exception as e:
+                            print(f"⚠️ Не вдалося видалити подію звички {event_id}: {e}")
+
+                for t in tasks:
+                    event_id = t.get("event_id")
+                    if event_id:
+                        try:
+                            delete_event_by_id(user_id, event_id)
+                            update_entry("tasks_active", t["id"], {"event_id": None}, user_id)
+                            deleted_count += 1
+                        except Exception as e:
+                            print(f"⚠️ Не вдалося видалити подію завдання {event_id}: {e}")
+
+                st.success(f"✅ Видалено {deleted_count} подій з Google Calendar та скинуто event_id.")
+
+            except Exception as e:
+                st.error(f"❌ Помилка при очищенні календаря: {e}")
+
+        if st.button("🔥 Видалити всі записи з бази"):
+            try:
+                token = st.session_state.get("token")
+                if not token:
+                    st.warning("❗ Access token не знайдено.")
+                    return
+
+                from backend.database import get_supabase_client_with_token
+                client = get_supabase_client_with_token(token)
+
+                tables_to_clear = [
+                    "habits_active", "tasks_active",
+                    "habits_postponed", "tasks_postponed"
+                ]
+
+                for table in tables_to_clear:
+                    res = client.table(table).delete().eq("user_id", user_id).execute()
+                    print(f"🗑️ Видалено з {table}: {res}")
+
+                st.success("✅ Усі записи користувача видалені з бази даних.")
+
+            except Exception as e:
+                st.error(f"❌ Помилка при видаленні записів: {e}")
+
+
+

@@ -1,5 +1,5 @@
 import streamlit as st
-from frontend.auth import require_login, get_current_user, update_display_name, update_email, update_password
+from frontend.auth import require_login, get_current_user, update_display_name, update_password
 
 def show_profile():
     user = require_login()
@@ -22,12 +22,6 @@ def show_profile():
         update_display_name(new_name)
         st.success("Ім’я оновлено!")
         st.rerun()
-
-    st.subheader("📧 Оновити Email")
-    new_email = st.text_input("Новий Email", value=user_info["email"])
-    if st.button("Оновити Email"):
-        update_email(new_email)
-        st.info("Перевірте пошту для підтвердження зміни email.")
 
     st.subheader("🔒 Змінити пароль")
     new_password = st.text_input("Новий пароль", type="password")
