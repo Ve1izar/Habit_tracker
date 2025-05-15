@@ -25,7 +25,8 @@ def get_credentials(user_id: str) -> Credentials:
     token_path = get_token_path(user_id)
 
     if not token_path.exists():
-        raise Exception("❌ Access token не знайдено. Користувач не авторизований.")
+        return None
+        # raise Exception("❌ Access token не знайдено. Користувач не авторизований.")
 
     creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
@@ -60,6 +61,9 @@ def finish_auth_flow(flow, code: str, user_id: str):
 
 def get_calendar_service_for_user(user_id: str):
     creds = get_credentials(user_id)
+    if not creds:
+        return None
+
     return build("calendar", "v3", credentials=creds)
 
 

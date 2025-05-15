@@ -23,12 +23,6 @@ def show_profile():
         st.success("Ім’я оновлено!")
         st.rerun()
 
-    # st.subheader("📧 Оновити Email")
-    # new_email = st.text_input("Новий Email", value=user_info["email"])
-    # if st.button("Оновити Email"):
-    #     update_email(new_email)
-    #     st.info("Перевірте пошту для підтвердження зміни email.")
-
     st.subheader("🔒 Змінити пароль")
     new_password = st.text_input("Новий пароль", type="password")
     if st.button("Змінити пароль"):

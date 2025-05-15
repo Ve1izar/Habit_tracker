@@ -3,8 +3,7 @@ from datetime import timedelta
 import time
 from googleapiclient.discovery import build
 from backend.google_auth import get_calendar_service_for_user
-from backend.database import update_entry
-from utils.helpers import format_recurrence, format_datetime_for_gcal, get_next_occurrence, get_byday_rrule_code
+from utils.helpers import format_datetime_for_gcal, get_next_occurrence, get_byday_rrule_code
 
 def add_event_to_calendar(user_id: str, summary: str, start: datetime, end: datetime,
                           description: str = "", recurrence: list = None,
@@ -89,10 +88,6 @@ def delete_event_by_id(user_id: str, event_id: str):
 # -------------------------------
 # Масова синхронізація (для наявних записів)
 # -------------------------------
-import datetime
-from backend.calendar_sync import add_event_to_calendar
-from backend.database import update_entry, fetch_table
-from utils.helpers import format_recurrence, get_next_occurrence
 
 def sync_all_to_calendar(user_id: str):
     from backend.database import fetch_table, update_entry
@@ -202,52 +197,3 @@ def delete_spam_events(user_id: str):
     return deleted_count
 
 
-# ---- Синхронізація звичок ----
-def sync_habits_to_calendar(user_id: str):
-    from backend.database import fetch_table, delete_entry, insert_to_table
-    habits = fetch_table("habits_active", user_id)
-
-    unsynced_habits = [h for h in habits if not h.get("event_id")]
-
-    for h in unsynced_habits:
-        try:
-            # Видалити старий запис
-            delete_entry("habits_active", h["id"], user_id)
-
-            # Отримати параметри для події
-            name = h["name"]
-            description = h.get("description", "")
-            frequency = h["frequency"]
-            time_str = h.get("time", "09:00")
-            hour, minute = map(int, time_str.split(":"))
-            start = datetime.datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
-
-            if frequency == "monthly":
-                day = h.get("day_of_week", 0)
-                week = h.get("monthly_week", 1)
-                next_date = get_next_occurrence(day, week)
-                start = datetime.datetime.combine(next_date, datetime.time(hour, minute))
-
-            end = start + datetime.timedelta(hours=1)
-            recurrence = format_recurrence(h)
-
-            # Створити подію в календарі
-            event_id = add_event_to_calendar(user_id, name, start, end, description, recurrence)
-
-            # Вставити новий запис
-            new_habit = {
-                "name": name,
-                "description": description,
-                "frequency": frequency,
-                "time": time_str,
-                "user_id": user_id,
-                "event_id": event_id,
-                "day_of_week": h.get("day_of_week"),
-                "monthly_week": h.get("monthly_week")
-            }
-
-            insert_to_table("habits_active", new_habit)
-            print(f"✅ Звичку {name} повторно додано і синхронізовано.")
-
-        except Exception as e:
-            print(f"❌ Помилка синхронізації звички {h['name']}: {e}")

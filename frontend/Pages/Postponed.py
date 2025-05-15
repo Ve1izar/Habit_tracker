@@ -10,6 +10,7 @@ from utils.helpers import format_day_of_week, format_monthly_position
 
 def show_postponed():
     user = require_login()
+
     st.title("⏸️ Відкладені звички та завдання")
 
     habits, tasks = get_postponed_items(user.id)
