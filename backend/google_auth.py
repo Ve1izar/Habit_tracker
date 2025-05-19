@@ -18,10 +18,20 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 def get_token_path(user_id: str) -> Path:
+    """
+    Отримати шлях до токена користувача.
+    :param user_id:
+    :return:
+    """
     return TOKENS_DIR / f"user_{user_id}.json"
 
 
 def get_credentials(user_id: str) -> Credentials:
+    """
+    Отримати об'єкт Credentials для користувача.
+    :param user_id:
+    :return:
+    """
     token_path = get_token_path(user_id)
 
     if not token_path.exists():
@@ -39,12 +49,22 @@ def get_credentials(user_id: str) -> Credentials:
 
 
 def save_credentials(user_id: str, creds: Credentials):
+    """
+    Зберегти об'єкт Credentials у файл.
+    :param user_id:
+    :param creds:
+    :return:
+    """
     token_path = get_token_path(user_id)
     with open(token_path, "w") as token_file:
         token_file.write(creds.to_json())
 
 
 def start_auth_flow():
+    """
+    Запустити авторизаційний потік.
+    :return:
+    """
     flow = InstalledAppFlow.from_client_secrets_file(
         CREDENTIALS_PATH, SCOPES, redirect_uri="urn:ietf:wg:oauth:2.0:oob"
     )
@@ -53,6 +73,13 @@ def start_auth_flow():
 
 
 def finish_auth_flow(flow, code: str, user_id: str):
+    """
+    Завершити авторизаційний потік.
+    :param flow:
+    :param code:
+    :param user_id:
+    :return:
+    """
     flow.fetch_token(code=code)
     creds = flow.credentials
     save_credentials(user_id, creds)
@@ -60,6 +87,11 @@ def finish_auth_flow(flow, code: str, user_id: str):
 
 
 def get_calendar_service_for_user(user_id: str):
+    """
+    Отримати сервіс Google Calendar для користувача.
+    :param user_id:
+    :return:
+    """
     creds = get_credentials(user_id)
     if not creds:
         return None

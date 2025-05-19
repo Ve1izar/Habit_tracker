@@ -1,17 +1,30 @@
 import datetime
 from datetime import timedelta
 import time
-from googleapiclient.discovery import build
-from backend.google_auth import get_calendar_service_for_user
-from utils.helpers import format_datetime_for_gcal, get_next_occurrence, get_byday_rrule_code
 
-def add_event_to_calendar(user_id: str, summary: str, start: datetime, end: datetime,
-                          description: str = "", recurrence: list = None,
-                          frequency: str = None, day_of_week: int = None, monthly_week: int = None) -> str:
+from loguru import logger
+
+from backend.google_auth import get_calendar_service_for_user
+from utils.helpers import format_datetime_for_gcal, get_byday_rrule_code
+from backend.database import fetch_table, update_entry
+from utils.helpers import format_recurrence, get_next_occurrence
+
+
+def add_event_to_calendar(
+        user_id: str,
+        summary: str,
+        start: datetime,
+        end: datetime,
+        description: str = "",
+        recurrence: list | None = None,
+        frequency: str | None = None,
+        day_of_week: int | None = None,
+        monthly_week: int | None = None,
+) -> str:
     service = get_calendar_service_for_user(user_id)
 
     # Обчислити правильну дату початку для повторюваних звичок
-    if recurrence and frequency:
+    if recurrence is not None and frequency is not None:
         first_date = get_next_occurrence(frequency, day_of_week, monthly_week)
         start = start.replace(year=first_date.year, month=first_date.month, day=first_date.day)
         end = start + timedelta(hours=1)
@@ -36,11 +49,14 @@ def add_event_to_calendar(user_id: str, summary: str, start: datetime, end: date
     return created_event["id"]
 
 
-
-# -------------------------------
-# Оновити подію
-# -------------------------------
 def update_event_in_calendar(user_id: str, event_id: str, entry: dict):
+    """
+    Оновлення події в Google Calendar.
+    :param user_id:
+    :param event_id:
+    :param entry:
+    :return:
+    """
     service = get_calendar_service_for_user(user_id)
 
     event = service.events().get(calendarId='primary', eventId=event_id).execute()
@@ -72,28 +88,26 @@ def update_event_in_calendar(user_id: str, event_id: str, entry: dict):
     service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
 
 
-
-# -------------------------------
-# Видалити подію з primary календаря
-# -------------------------------
 def delete_event_by_id(user_id: str, event_id: str):
+    """
+    Видалити подію з Google Calendar за ID.
+    :param user_id:
+    :param event_id:
+    :return:
+    """
     service = get_calendar_service_for_user(user_id)
     try:
         service.events().delete(calendarId='primary', eventId=event_id).execute()
     except Exception as e:
-        print(f"⚠️ Не вдалося видалити подію {event_id}: {e}")
+        logger.warning(f"⚠️ Не вдалося видалити подію {event_id}: {e}")
 
-
-
-# -------------------------------
-# Масова синхронізація (для наявних записів)
-# -------------------------------
 
 def sync_all_to_calendar(user_id: str):
-    from backend.database import fetch_table, update_entry
-    from backend.calendar_sync import add_event_to_calendar
-    from utils.helpers import format_recurrence, get_next_occurrence
-
+    """
+    Синхронізація всіх звичок і завдань з Google Calendar.
+    :param user_id:
+    :return:
+    """
     habits = fetch_table("habits_active", user_id)
     tasks = fetch_table("tasks_active", user_id)
 
@@ -101,7 +115,7 @@ def sync_all_to_calendar(user_id: str):
     for h in habits:
         event_id = h.get("event_id")
         if event_id and str(event_id).strip():
-            print(f"✅ Пропущено (вже синхронізовано): {h['name']}")
+            logger.info(f"✅ Пропущено (вже синхронізовано): {h['name']}")
             continue
 
         try:
@@ -138,17 +152,17 @@ def sync_all_to_calendar(user_id: str):
             )
 
             update_entry("habits_active", h["id"], {"event_id": event_id}, user_id)
-            print(f"✅ Синхронізовано звичку: {h['name']}")
+            logger.info(f"✅ Синхронізовано звичку: {h['name']}")
 
         except Exception as e:
-            print(f"❌ Помилка синхронізації звички {h['name']}: {e}")
+            logger.error(f"❌ Помилка синхронізації звички {h['name']}: {e}")
 
     # --- Синхронізація завдань ---
     for t in tasks:
         try:
             event_id = t.get("event_id")
             if event_id and str(event_id).strip():
-                print(f"✅ Пропущено (вже синхронізовано): {t['name']}")
+                logger.info(f"✅ Пропущено (вже синхронізовано): {t['name']}")
                 continue
 
             if not t.get("date") or not t.get("time"):
@@ -159,16 +173,18 @@ def sync_all_to_calendar(user_id: str):
 
             event_id = add_event_to_calendar(user_id, t["name"], start, end, t.get("description", ""))
             update_entry("tasks_active", t["id"], {"event_id": event_id}, user_id)
-            print(f"✅ Синхронізовано завдання: {t['name']}")
+            logger.info(f"✅ Синхронізовано завдання: {t['name']}")
 
         except Exception as e:
-            print(f"❌ Помилка синхронізації завдання {t['name']}: {e}")
+            logger.error(f"❌ Помилка синхронізації завдання {t['name']}: {e}")
 
 
-# -------------------------------
-# Очистити всі події з primary календаря (на 30 днів уперед)
-# -------------------------------
 def delete_spam_events(user_id: str):
+    """
+    Видалити всі події з Google Calendar (на 30 днів уперед).
+    :param user_id:
+    :return:
+    """
     service = get_calendar_service_for_user(user_id)
     events = []
     page_token = None
@@ -192,8 +208,6 @@ def delete_spam_events(user_id: str):
             deleted_count += 1
             time.sleep(0.1)  # Затримка 100 мс
         except Exception as e:
-            print(f"⚠️ Не вдалося видалити подію {event['id']}: {e}")
+            logger.warning(f"⚠️ Не вдалося видалити подію {event['id']}: {e}")
 
     return deleted_count
-
-

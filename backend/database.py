@@ -3,31 +3,62 @@ from dotenv import load_dotenv
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 from supabase import create_client
-from supabase.lib.client_options import ClientOptions
+from supabase.lib.client_options import SyncClientOptions
 
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- Отримати токен з сесії ---
+
 def get_token():
+    """
+    Отримати токен з сесії Streamlit.
+    :return:
+    """
     if "token" in st.session_state:
         return st.session_state["token"]
     raise ValueError("❌ Токен не знайдено. Користувач не авторизований.")
 
-# --- Створити клієнта з токеном користувача ---
-def get_supabase_client_with_token(token: str):
-    options = ClientOptions(headers={"Authorization": f"Bearer {token}"})
+
+def get_supabase_client_with_token(token: str) -> object:
+    """
+    Створити клієнта Supabase з токеном користувача.
+    :param token:
+    :return:
+    """
+    options = SyncClientOptions(headers={"Authorization": f"Bearer {token}"})
     return create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
 
-# --- Додати запис до таблиці ---
-def insert_to_table(table: str, data: dict):
+
+def insert_to_table(
+        table: str,
+        data: dict
+) -> None:
+    """
+    Додати запис до таблиці Supabase.
+    :param table:
+    :param data:
+    :return:
+    """
     client = get_supabase_client_with_token(get_token())
     client.table(table).insert(data).execute()
 
-# --- Оновити запис у таблиці ---
-def update_entry(table: str, entry_id: str, updated_data: dict, user_id: str):
+
+def update_entry(
+        table: str,
+        entry_id: str,
+        updated_data: dict,
+        user_id: str
+) -> None:
+    """
+    Оновлення запису в таблиці Supabase.
+    :param table:
+    :param entry_id:
+    :param updated_data:
+    :param user_id:
+    :return:
+    """
     token = st.session_state.get("token")
     if not token:
         raise Exception("❌ Access token не знайдено")
@@ -81,8 +112,18 @@ def update_entry(table: str, entry_id: str, updated_data: dict, user_id: str):
         update_event_in_calendar(user_id, event_id, updated_entry)
 
 
-# --- Видалити запис з таблиці ---
-def delete_entry(table: str, entry_id: str, user_id: str):
+def delete_entry(
+        table: str,
+        entry_id: str,
+        user_id: str
+) -> None:
+    """
+    Видалити запис з таблиці Supabase.
+    :param table:
+    :param entry_id:
+    :param user_id:
+    :return:
+    """
 
     token = st.session_state.get("token")
     if not token:
@@ -103,8 +144,19 @@ def delete_entry(table: str, entry_id: str, user_id: str):
         from backend.calendar_sync import delete_event_by_id
         delete_event_by_id(user_id, event_id)
 
-# --- Отримати всі записи з таблиці ---
-def fetch_table(table: str, user_id: str, entry_id: str = None):
+
+def fetch_table(
+        table: str,
+        user_id: str,
+        entry_id: str = None
+) -> list:
+    """
+    Отримати записи з таблиці Supabase.
+    :param table:
+    :param user_id:
+    :param entry_id:
+    :return:
+    """
     client = get_supabase_client_with_token(get_token())
     query = client.table(table).select("*").eq("user_id", user_id)
     if entry_id:
@@ -113,8 +165,22 @@ def fetch_table(table: str, user_id: str, entry_id: str = None):
     return result.data if result.data else []
 
 
-# --- Перемістити запис з однієї таблиці в іншу ---
-def move_entry(source_table: str, target_table: str, entry_id: int, user_id: str, extra_fields: dict = None):
+def move_entry(
+        source_table: str,
+        target_table: str,
+        entry_id: int,
+        user_id: str,
+        extra_fields: dict = None
+) -> None:
+    """
+    Перемістити запис з однієї таблиці в іншу.
+    :param source_table:
+    :param target_table:
+    :param entry_id:
+    :param user_id:
+    :param extra_fields:
+    :return:
+    """
     token = st.session_state.get("token")
     if not token:
         raise Exception("❌ Access token не знайдено")
@@ -132,9 +198,14 @@ def move_entry(source_table: str, target_table: str, entry_id: int, user_id: str
     client.table(target_table).insert(entry).execute()
     client.table(source_table).delete().eq("id", entry_id).eq("user_id", user_id).execute()
 
-def clear_all_event_ids(user_id: str):
+
+def clear_all_event_ids(user_id: str) -> None:
+    """
+    Очистити всі event_id в таблицях habits_active і tasks_active.
+    :param user_id:
+    :return:
+    """
     client = get_supabase_client_with_token(get_token())
 
     for table in ["habits_active", "tasks_active"]:
         client.table(table).update({"event_id": None}).eq("user_id", user_id).execute()
-
