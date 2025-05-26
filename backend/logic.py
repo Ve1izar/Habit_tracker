@@ -19,34 +19,67 @@ from backend.calendar_sync import (
 from utils.helpers import format_day_of_week
 
 
-# --- Активні звички ---
 def get_active_habits(user_id):
+    """
+    Отримати активні звички користувача.
+    :param user_id:
+    :return:
+    """
     habits = fetch_table("habits_active", user_id)
     for habit in habits:
         habit["day_name"] = format_day_of_week(int(habit.get("day_of_week") or 0))
     return habits
 
-# --- Активні завдання ---
+
 def get_active_tasks(user_id):
+    """
+    Отримати активні завдання користувача.
+    :param user_id:
+    :return:
+    """
     return fetch_table("tasks_active", user_id)
 
-# --- Відкладені звички і завдання ---
+
 def get_postponed_habits(user_id):
+    """
+    Отримати відкладені звички користувача.
+    :param user_id:
+    :return:
+    """
     habits = fetch_table("habits_postponed", user_id)
     for habit in habits:
         habit["day_name"] = format_day_of_week(int(habit.get("day_of_week") or 0))
     return habits
 
+
 def get_postponed_tasks(user_id):
+    """
+    Отримати відкладені завдання користувача.
+    :param user_id:
+    :return:
+    """
     return fetch_table("tasks_postponed", user_id)
 
+
 def get_postponed_items(user_id: str):
+    """
+    Отримати відкладені звички і завдання користувача.
+    :param user_id:
+    :return:
+    """
     habits = get_postponed_habits(user_id)
     tasks = get_postponed_tasks(user_id)
     return habits, tasks
 
-# --- Завершити запис ---
+
 def complete_entry(entry_type: str, entry_id: str, user_id: str):
+    """
+    Завершити запис (звичку або завдання).
+    :param entry_type:
+    :param entry_id:
+    :param user_id:
+    :return:
+    """
     now = datetime.now(timezone.utc).isoformat()
 
     if entry_type == "habit":
@@ -69,31 +102,64 @@ def complete_entry(entry_type: str, entry_id: str, user_id: str):
                 "completed_at": now
             })
 
-# --- Завершити звичку ---
+
 def complete_habit_perm(entry_id: str, user_id: str):
+    """
+    Завершити звичку.
+    :param entry_id:
+    :param user_id:
+    :return:
+    """
     move_entry("habits_active", "habits_completed", entry_id, user_id)
 
-# --- Відкласти запис ---
+
 def postpone_entry(entry_type, entry_id, user_id):
+    """
+    Відкласти запис (звичку або завдання).
+    :param entry_type:
+    :param entry_id:
+    :param user_id:
+    :return:
+    """
     source = f"{entry_type}s_active"
     target = f"{entry_type}s_postponed"
     move_entry(source, target, entry_id, user_id)
 
-# --- Повернути запис ---
+
 def restore_entry(entry_type, entry_id, user_id):
+    """
+    Повернути запис (звичку або завдання) з відкладених до активних.
+    :param entry_type:
+    :param entry_id:
+    :param user_id:
+    :return:
+    """
     source = f"{entry_type}s_postponed"
     target = f"{entry_type}s_active"
     move_entry(source, target, entry_id, user_id)
 
-# --- Оновити запис + календар ---
+
 def update_entry_with_calendar(table, entry_id, data, user_id):
+    """
+    Оновити запис у таблиці та синхронізувати з Google Calendar.
+    :param table:
+    :param entry_id:
+    :param data:
+    :param user_id:
+    :return:
+    """
     update_entry(table, entry_id, data, user_id)
     updated = fetch_table(table, user_id, entry_id)
     if updated and updated[0].get("event_id"):
         update_event_in_calendar(user_id, updated[0]["event_id"], updated[0])
 
-# --- Статистика завершених ---
+
 def get_completed_entries_by_month(user_id):
+    """
+    Отримати завершені звички та завдання за місяць.
+    :param user_id:
+    :return:
+    """
     habit_logs = fetch_table("habit_logs", user_id)
     habits_completed = fetch_table("habits_completed", user_id)
     tasks = fetch_table("tasks_completed", user_id)
@@ -118,6 +184,10 @@ def get_completed_entries_by_month(user_id):
     return pd.DataFrame(habit_logs + habits_completed + tasks)
 
 
-# --- Синхронізація ---
 def sync_events_to_google_calendar(user_id):
+    """
+    Синхронізувати події з Google Calendar.
+    :param user_id:
+    :return:
+    """
     sync_all_to_calendar(user_id)

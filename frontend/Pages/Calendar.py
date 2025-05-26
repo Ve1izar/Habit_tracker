@@ -2,7 +2,6 @@ import streamlit as st
 from google.auth.exceptions import RefreshError
 from backend.google_auth import (
     get_credentials,
-    get_calendar_service_for_user,
     start_auth_flow,
     finish_auth_flow,
     get_token_path,
@@ -147,6 +146,3 @@ def show_calendar():
 
             except Exception as e:
                 st.error(f"❌ Помилка при видаленні записів: {e}")
-
-
-
