@@ -6,7 +6,7 @@ from backend.google_auth import (
     finish_auth_flow,
     get_token_path,
 )
-
+from backend.calendar_sync import sync_habits_only
 import os
 
 def show_calendar():
@@ -70,7 +70,7 @@ def show_calendar():
     # 🔄 Синхронізація справ
     # --------------------------
     st.markdown("---")
-    st.subheader("🔄 Синхронізація активних справ (без event_id)")
+    st.subheader("🔄 Синхронізація активних записів")
     if st.button("🔁 Синхронізувати справи"):
         try:
             from backend.calendar_sync import sync_all_to_calendar
