@@ -119,43 +119,55 @@ def sync_all_to_calendar(user_id: str):
             continue
 
         try:
+            # --- Час виконання звички ---
             time_str = h.get("time", "09:00")
-            hour, minute = map(int, time_str.split(":"))
+            time_parts = list(map(int, time_str.split(":")[:2]))  # підтримує "HH:MM" і "HH:MM:SS"
+            hour, minute = time_parts[0], time_parts[1]
 
             frequency = h.get("frequency", "daily")
             recurrence = format_recurrence(h)
 
-            # Обчислення дати старту
+            # --- Обчислення дати старту ---
             if frequency == "monthly":
                 day = h.get("day_of_week", 0)
                 week = h.get("monthly_week", 1)
                 next_date = get_next_occurrence(day, week)
+
             elif frequency == "weekly":
-                today = datetime.datetime.today().weekday()
+                today = datetime.date.today()
+                today_weekday = today.weekday()
                 target_day = h.get("day_of_week", 0)
-                delta_days = (target_day - today) % 7
-                next_date = (datetime.datetime.now() + datetime.timedelta(days=delta_days)).date()
+                delta_days = (target_day - today_weekday) % 7
+                if delta_days == 0:
+                    delta_days = 7  # не сьогодні, а наступний тиждень
+                next_date = today + datetime.timedelta(days=delta_days)
+
             else:
                 # daily — просто сьогодні
-                next_date = datetime.datetime.now().date()
+                next_date = datetime.date.today()
 
+            # --- Дата/час початку події ---
             start = datetime.datetime.combine(next_date, datetime.time(hour, minute))
             end = start + datetime.timedelta(hours=1)
 
-            event_id = add_event_to_calendar(
-                user_id,
-                h["name"],
-                start,
-                end,
-                h.get("description", ""),
-                recurrence
+            # --- Створення події ---
+            new_event_id = add_event_to_calendar(
+                user_id=user_id,
+                summary=h["name"],
+                start=start,
+                end=end,
+                description=h.get("description", ""),
+                recurrence=recurrence,
+                frequency=frequency,
+                day_of_week=h.get("day_of_week"),
+                monthly_week=h.get("monthly_week")
             )
 
-            update_entry("habits_active", h["id"], {"event_id": event_id}, user_id)
+            update_entry("habits_active", h["id"], {"event_id": new_event_id}, user_id)
             logger.info(f"✅ Синхронізовано звичку: {h['name']}")
 
         except Exception as e:
-            logger.error(f"❌ Помилка синхронізації звички {h['name']}: {e}")
+            logger.exception(f"❌ Помилка синхронізації звички {h.get('name', '[без назви]')}: {e}")
 
     # --- Синхронізація завдань ---
     for t in tasks:

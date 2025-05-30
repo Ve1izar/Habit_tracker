@@ -92,7 +92,7 @@ def get_next_occurrence(weekday: int, week_of_month: int, base_date: datetime = 
         if len(valid_weeks) >= week_of_month:
             day = valid_weeks[week_of_month - 1][weekday]
             candidate = datetime(year, month, day)
-            if candidate.date() >= base_date.date():
+            if candidate.date() > base_date.date():
                 return candidate
 
         # перейти на наступний місяць
