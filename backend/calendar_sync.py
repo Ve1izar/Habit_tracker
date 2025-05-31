@@ -22,13 +22,21 @@ def add_event_to_calendar(
         monthly_week: int | None = None,
 ) -> str:
     service = get_calendar_service_for_user(user_id)
-
-    # Обчислити правильну дату початку для повторюваних звичок
     if recurrence is not None and frequency is not None:
-        first_date = get_next_occurrence(frequency, day_of_week, monthly_week)
-        start = start.replace(year=first_date.year, month=first_date.month, day=first_date.day)
-        end = start + timedelta(hours=1)
+        initial_start_date = start.date()
+        calculated_first_occurrence_date = initial_start_date
 
+        if frequency == "weekly":
+            if day_of_week is not None:
+                days_difference = (day_of_week - initial_start_date.weekday() + 7) % 7
+                calculated_first_occurrence_date = initial_start_date + timedelta(days=days_difference)
+        elif frequency == "monthly":
+            if day_of_week is not None and monthly_week is not None:
+                first_occurrence_dt = get_next_occurrence(day_of_week, monthly_week, base_date=start)
+                calculated_first_occurrence_date = first_occurrence_dt.date()
+
+        start = datetime.datetime.combine(calculated_first_occurrence_date, start.time())
+        end = start + timedelta(hours=1)
     event = {
         "summary": summary,
         "description": description,
@@ -76,14 +84,15 @@ def update_event_in_calendar(user_id: str, event_id: str, entry: dict):
     day_of_week = entry.get("day_of_week")
 
     if frequency and day_of_week is not None:
-        byday = get_byday_rrule_code(day_of_week, entry.get("monthly_week", 1))
+        byday_code = get_byday_rrule_code(day_of_week, entry.get("monthly_week", 1))
 
-        if frequency == "daily":
-            event["recurrence"] = ["RRULE:FREQ=DAILY"]
-        elif frequency == "weekly":
-            event["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={byday[-2:]}"]
-        elif frequency == "monthly":
-            event["recurrence"] = [f"RRULE:FREQ=MONTHLY;BYDAY={byday}"]
+        if byday_code:
+            if frequency == "daily":
+                event["recurrence"] = ["RRULE:FREQ=DAILY"]
+            elif frequency == "weekly":
+                event["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={byday_code[-2:]}"]
+            elif frequency == "monthly":
+                event["recurrence"] = [f"RRULE:FREQ=MONTHLY;BYDAY={byday_code}"]
 
     service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
 

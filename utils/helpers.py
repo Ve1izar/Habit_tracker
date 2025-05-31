@@ -45,7 +45,7 @@ def format_monthly_position(pos: int) -> str:
     return mapping.get(pos, "—")
 
 
-def get_byday_rrule_code(day_of_week: int, week_of_month: int) -> str:
+def get_byday_rrule_code(day_of_week: int, week_of_month: int) -> str | None:
     """
     Генерує код BYDAY для RRULE. Наприклад:
     - day_of_week = 2 (середа)
@@ -89,10 +89,10 @@ def get_next_occurrence(weekday: int, week_of_month: int, base_date: datetime = 
         month_cal = calendar.monthcalendar(year, month)
         valid_weeks = [week for week in month_cal if week[weekday] != 0]
 
-        if len(valid_weeks) >= week_of_month:
+        if 1 <= week_of_month <= len(valid_weeks):
             day = valid_weeks[week_of_month - 1][weekday]
-            candidate = datetime(year, month, day)
-            if candidate.date() > base_date.date():
+            candidate = datetime(year, month, day, base_date.hour, base_date.minute, base_date.second, base_date.microsecond)
+            if candidate >= base_date:
                 return candidate
 
         # перейти на наступний місяць
