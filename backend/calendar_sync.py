@@ -22,13 +22,21 @@ def add_event_to_calendar(
         monthly_week: int | None = None,
 ) -> str:
     service = get_calendar_service_for_user(user_id)
-
-    # Обчислити правильну дату початку для повторюваних звичок
     if recurrence is not None and frequency is not None:
-        first_date = get_next_occurrence(frequency, day_of_week, monthly_week)
-        start = start.replace(year=first_date.year, month=first_date.month, day=first_date.day)
-        end = start + timedelta(hours=1)
+        initial_start_date = start.date()
+        calculated_first_occurrence_date = initial_start_date
 
+        if frequency == "weekly":
+            if day_of_week is not None:
+                days_difference = (day_of_week - initial_start_date.weekday() + 7) % 7
+                calculated_first_occurrence_date = initial_start_date + timedelta(days=days_difference)
+        elif frequency == "monthly":
+            if day_of_week is not None and monthly_week is not None:
+                first_occurrence_dt = get_next_occurrence(day_of_week, monthly_week, base_date=start)
+                calculated_first_occurrence_date = first_occurrence_dt.date()
+
+        start = datetime.datetime.combine(calculated_first_occurrence_date, start.time())
+        end = start + timedelta(hours=1)
     event = {
         "summary": summary,
         "description": description,
@@ -76,14 +84,15 @@ def update_event_in_calendar(user_id: str, event_id: str, entry: dict):
     day_of_week = entry.get("day_of_week")
 
     if frequency and day_of_week is not None:
-        byday = get_byday_rrule_code(day_of_week, entry.get("monthly_week", 1))
+        byday_code = get_byday_rrule_code(day_of_week, entry.get("monthly_week", 1))
 
-        if frequency == "daily":
-            event["recurrence"] = ["RRULE:FREQ=DAILY"]
-        elif frequency == "weekly":
-            event["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={byday[-2:]}"]
-        elif frequency == "monthly":
-            event["recurrence"] = [f"RRULE:FREQ=MONTHLY;BYDAY={byday}"]
+        if byday_code:
+            if frequency == "daily":
+                event["recurrence"] = ["RRULE:FREQ=DAILY"]
+            elif frequency == "weekly":
+                event["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={byday_code[-2:]}"]
+            elif frequency == "monthly":
+                event["recurrence"] = [f"RRULE:FREQ=MONTHLY;BYDAY={byday_code}"]
 
     service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
 
@@ -119,43 +128,55 @@ def sync_all_to_calendar(user_id: str):
             continue
 
         try:
+            # --- Час виконання звички ---
             time_str = h.get("time", "09:00")
-            hour, minute = map(int, time_str.split(":"))
+            time_parts = list(map(int, time_str.split(":")[:2]))  # підтримує "HH:MM" і "HH:MM:SS"
+            hour, minute = time_parts[0], time_parts[1]
 
             frequency = h.get("frequency", "daily")
             recurrence = format_recurrence(h)
 
-            # Обчислення дати старту
+            # --- Обчислення дати старту ---
             if frequency == "monthly":
                 day = h.get("day_of_week", 0)
                 week = h.get("monthly_week", 1)
                 next_date = get_next_occurrence(day, week)
+
             elif frequency == "weekly":
-                today = datetime.datetime.today().weekday()
+                today = datetime.date.today()
+                today_weekday = today.weekday()
                 target_day = h.get("day_of_week", 0)
-                delta_days = (target_day - today) % 7
-                next_date = (datetime.datetime.now() + datetime.timedelta(days=delta_days)).date()
+                delta_days = (target_day - today_weekday) % 7
+                if delta_days == 0:
+                    delta_days = 7  # не сьогодні, а наступний тиждень
+                next_date = today + datetime.timedelta(days=delta_days)
+
             else:
                 # daily — просто сьогодні
-                next_date = datetime.datetime.now().date()
+                next_date = datetime.date.today()
 
+            # --- Дата/час початку події ---
             start = datetime.datetime.combine(next_date, datetime.time(hour, minute))
             end = start + datetime.timedelta(hours=1)
 
-            event_id = add_event_to_calendar(
-                user_id,
-                h["name"],
-                start,
-                end,
-                h.get("description", ""),
-                recurrence
+            # --- Створення події ---
+            new_event_id = add_event_to_calendar(
+                user_id=user_id,
+                summary=h["name"],
+                start=start,
+                end=end,
+                description=h.get("description", ""),
+                recurrence=recurrence,
+                frequency=frequency,
+                day_of_week=h.get("day_of_week"),
+                monthly_week=h.get("monthly_week")
             )
 
-            update_entry("habits_active", h["id"], {"event_id": event_id}, user_id)
+            update_entry("habits_active", h["id"], {"event_id": new_event_id}, user_id)
             logger.info(f"✅ Синхронізовано звичку: {h['name']}")
 
         except Exception as e:
-            logger.error(f"❌ Помилка синхронізації звички {h['name']}: {e}")
+            logger.exception(f"❌ Помилка синхронізації звички {h.get('name', '[без назви]')}: {e}")
 
     # --- Синхронізація завдань ---
     for t in tasks:

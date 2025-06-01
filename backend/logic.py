@@ -17,7 +17,10 @@ from backend.calendar_sync import (
 )
 
 from utils.helpers import format_day_of_week
-
+from backend.database import get_supabase_client_with_token, update_entry, move_entry
+from backend.google_auth import get_calendar_service_for_user
+from googleapiclient.errors import HttpError
+import streamlit as st
 
 def get_active_habits(user_id):
     """
@@ -103,14 +106,33 @@ def complete_entry(entry_type: str, entry_id: str, user_id: str):
             })
 
 
-def complete_habit_perm(entry_id: str, user_id: str):
-    """
-    Завершити звичку.
-    :param entry_id:
-    :param user_id:
-    :return:
-    """
-    move_entry("habits_active", "habits_completed", entry_id, user_id)
+def complete_habit_perm(habit_id: str, user_id: str):
+    token = st.session_state.get("token")
+    if not token:
+        raise Exception("❌ Access token не знайдено")
+
+    client = get_supabase_client_with_token(token)
+    result = client.table("habits_active").select("*").eq("id", habit_id).eq("user_id", user_id).execute()
+
+    if not result.data:
+        raise Exception("❌ Звичку не знайдено")
+
+    habit = result.data[0]
+    event_id = habit.get("event_id")
+
+    # 🗑️ Видаляємо подію з Google Calendar
+    if event_id:
+        try:
+            service = get_calendar_service_for_user(user_id)
+            service.events().delete(calendarId="primary", eventId=event_id).execute()
+        except HttpError as e:
+            print(f"⚠️ Помилка при видаленні події з календаря: {e}")
+
+    # 🧹 Очищаємо event_id у таблиці
+    update_entry("habits_active", habit_id, {"event_id": None}, user_id)
+
+    # 🔁 Переносимо запис до habits_completed
+    move_entry("habits_active", "habits_completed", habit_id, user_id)
 
 
 def postpone_entry(entry_type, entry_id, user_id):
@@ -138,6 +160,13 @@ def restore_entry(entry_type, entry_id, user_id):
     target = f"{entry_type}s_active"
     move_entry(source, target, entry_id, user_id)
 
+def restore_from_completed(entry_type: str, entry_id: int, user_id: str):
+    """
+    Повернути запис із *_completed до *_active.
+    """
+    source = f"{entry_type}s_completed"
+    target = f"{entry_type}s_active"
+    move_entry(source, target, entry_id, user_id)
 
 def update_entry_with_calendar(table, entry_id, data, user_id):
     """
